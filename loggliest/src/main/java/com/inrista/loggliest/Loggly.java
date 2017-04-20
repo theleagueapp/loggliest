@@ -37,6 +37,7 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -147,6 +148,7 @@ public class Loggly {
     private static int mAppVersionCode = 0;
     private static HashMap<String, String> mStickyInfo = null;
     private static int mMaxSizeOnDisk = 0;
+    private static HashMap<String, String> mExtraLogValues = new HashMap<>();
     
     /**
      * Configures the {@link Loggly} instance.
@@ -422,14 +424,30 @@ public class Loggly {
         mLogQueue.offer(jsonObject);
     }
 
+    public static void appendKeyValueToLogs(String key, String value) {
+        mExtraLogValues.put(key, value);
+    }
+
+    public static void removeKeyFromLogs(String key) {
+        if (mExtraLogValues.containsKey(key)) {
+            mExtraLogValues.remove(key);
+        }
+    }
+
     private static void log(String key, Object msg, String level, long time) {
         JSONObject json = new JSONObject();
         try {
             json.put("timestamp", time);
             json.put("level", level);
+
+            for (String extraKey : mExtraLogValues.keySet()) {
+                json.put(extraKey, mExtraLogValues.get(extraKey));
+            }
+
             json.put(key, msg);
             log(json);
-        } catch (JSONException e) {}
+        } catch (JSONException e) {
+        }
     }
     
     /**
@@ -699,19 +717,15 @@ public class Loggly {
                 retrofit2.Response<LogglyResponse> response = call.execute();
 
                 if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
-
                 // Successful post
                 if (response.code() == 200) {
                     logFile.delete();
                     mRecentLogFile = null;
                 } else {
-
                 }
-            } 
-            
+            }
             // Post failed for some reason, keep log files and retry later
             catch (Exception error) {
-
             }
         }
     }
