@@ -43,15 +43,20 @@ import java.util.Locale;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-import retrofit.RestAdapter;
-import retrofit.RetrofitError;
-import retrofit.client.Response;
-import retrofit.http.Body;
-import retrofit.http.Headers;
-import retrofit.http.POST;
-import retrofit.http.Path;
-import retrofit.mime.TypedByteArray;
-import retrofit.mime.TypedInput;
+import okhttp3.Interceptor;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import retrofit2.Call;
+import retrofit2.Retrofit;
+import retrofit2.converter.gson.GsonConverterFactory;
+import retrofit2.http.Body;
+import retrofit2.http.Headers;
+import retrofit2.http.POST;
+import retrofit2.http.Path;
 
 /**
  * Android Loggly client using the HTTP/S bulk api.
@@ -335,11 +340,26 @@ public class Loggly {
             mAppVersionName = info.versionName;
             mAppVersionCode = info.versionCode;
         } catch (NameNotFoundException e) {}
-        
-        RestAdapter restAdapter = new RestAdapter.Builder()
-        .setEndpoint(logglyUrl)
-        .build();
-        mBulkLogService = restAdapter.create(IBulkLog.class);
+
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                .addInterceptor(new Interceptor() {
+                    @Override
+                    public Response intercept(Chain chain) throws IOException {
+                        Request.Builder ongoing = chain.request().newBuilder();
+                        ongoing.addHeader("Accept", "application/json");
+                        return chain.proceed(ongoing.build());
+                    }
+                });
+
+
+        OkHttpClient client = builder.build();
+        Retrofit retrofit = new Retrofit.Builder()
+                .baseUrl(logglyUrl)
+                .addConverterFactory(GsonConverterFactory.create())
+                .client(client)
+                .build();
+
+        mBulkLogService = retrofit.create(IBulkLog.class);
         
         start();
     }    
@@ -640,9 +660,8 @@ public class Loggly {
     }
     
     private interface IBulkLog {
-        @Headers("content-type:application/json")
         @POST("/bulk/{token}/tag/{tag}")
-        Response log(@Path("token") String token, @Path("tag") String logtag, @Body TypedInput body);
+        Call<LogglyResponse> log(@Path("token") String token, @Path("tag") String logtag, @Body RequestBody body);
     }
     
     private static void postLogs() {
@@ -672,21 +691,28 @@ public class Loggly {
             String json = builder.toString();
             if (json.isEmpty())
                 return;
-            
             try {
-                // Blocking POST
-                TypedInput body = new TypedByteArray("application/json", json.getBytes());
-                Response answer = mBulkLogService.log(mToken, mLogglyTag, body);
+                MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+                RequestBody body = RequestBody.create(JSON, json.getBytes());
+
+                Call<LogglyResponse> call = mBulkLogService.log(mToken, mLogglyTag, body);
+                retrofit2.Response<LogglyResponse> response = call.execute();
+
+                if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
 
                 // Successful post
-                if (answer.getStatus() == 200) {
+                if (response.code() == 200) {
                     logFile.delete();
                     mRecentLogFile = null;
+                } else {
+
                 }
             } 
             
             // Post failed for some reason, keep log files and retry later
-            catch (RetrofitError error) {}
+            catch (Exception error) {
+
+            }
         }
     }
 }
